@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 func GetAllUser(ctx *gin.Context) {
@@ -34,19 +35,11 @@ func GetById(ctx *gin.Context) {
 
 	user := new(responses.UserResponse)
 
-	err := database.DB.Table("users").Where("id = ?", id).Find(&user).Error
+	httpErrorStatus, findUserByIdErr := findUserById(&id, user)
 
-	if err != nil {
-		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-			"message": "Internal server error.",
-		})
-
-		return
-	}
-
-	if user.ID == nil {
-		ctx.AbortWithStatusJSON(http.StatusNotFound, gin.H{
-			"message": "User not found.",
+	if findUserByIdErr != "" {
+		ctx.AbortWithStatusJSON(httpErrorStatus, gin.H{
+			"message": findUserByIdErr,
 		})
 
 		return
@@ -64,6 +57,16 @@ func Store(ctx *gin.Context) {
 	if errReq := ctx.ShouldBind(&userReq); errReq != nil {
 		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
 			"message": errReq.Error(),
+		})
+
+		return
+	}
+
+	httpStatus, emailValidationCheckErr := checkIfEmailExists(&userReq.Email, nil)
+
+	if emailValidationCheckErr != "" {
+		ctx.AbortWithStatusJSON(httpStatus, gin.H{
+			"message": emailValidationCheckErr,
 		})
 
 		return
@@ -92,9 +95,99 @@ func Store(ctx *gin.Context) {
 }
 
 func UpdateById(ctx *gin.Context) {
+	id := ctx.Param("id")
 
+	user := new(responses.UserResponse)
+
+	userReq := new(requests.UserRequest)
+
+	if errReq := ctx.ShouldBind(&userReq); errReq != nil {
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+			"message": errReq.Error(),
+		})
+
+		return
+	}
+
+	httpErrorStatus, findUserByIdErr := findUserById(&id, user)
+
+	if findUserByIdErr != "" {
+		ctx.AbortWithStatusJSON(httpErrorStatus, gin.H{
+			"message": findUserByIdErr,
+		})
+
+		return
+	}
+
+	httpErrorStatus, emailValidationCheckErr := checkIfEmailExists(&userReq.Email, user.ID)
+
+	if emailValidationCheckErr != "" {
+		ctx.AbortWithStatusJSON(httpErrorStatus, gin.H{
+			"message": emailValidationCheckErr,
+		})
+
+		return
+	}
+
+	user.Name = &userReq.Name
+	user.Email = &userReq.Email
+	user.Address = &userReq.Address
+	user.BornDate = &userReq.BornDate
+
+	errUpdate := database.DB.Table("users").Where("id = ?", id).Updates(&user).Error
+
+	if errUpdate != nil {
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+			"message": "Internal server error.",
+		})
+
+		return
+	}
+
+	ctx.JSON(200, gin.H{
+		"message": "User updated.",
+		"data":    user,
+	})
 }
 
 func DeleteById(ctx *gin.Context) {
 
+}
+
+func findUserById(id *string, user *responses.UserResponse) (int, string) {
+	err := database.DB.Table("users").Where("id = ?", id).Find(&user).Error
+
+	if err != nil {
+		return http.StatusInternalServerError, "Internal server error"
+	}
+
+	if user.ID == nil {
+		return http.StatusNotFound, "User not found."
+	}
+
+	return http.StatusOK, ""
+}
+
+func checkIfEmailExists(email *string, userId *int) (int, string) {
+	userEmailExists := new(models.User)
+
+	errUserEmailExists := database.DB.Table("users").Where("email = ?", email).First(&userEmailExists).Error
+
+	if errUserEmailExists == gorm.ErrRecordNotFound {
+		return http.StatusOK, ""
+	}
+
+	if errUserEmailExists != nil {
+		return http.StatusInternalServerError, "Internal server error."
+	}
+
+	if userEmailExists.Email != nil && !userIsUpdatingItsData(*userId, *userEmailExists.ID) {
+		return http.StatusBadRequest, "User with that email is already exists."
+	}
+
+	return http.StatusOK, ""
+}
+
+func userIsUpdatingItsData(userIdFromInitialFetch int, userIdFromMailValidation int) bool {
+	return userIdFromInitialFetch == userIdFromMailValidation
 }
