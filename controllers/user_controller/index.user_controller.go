@@ -151,7 +151,29 @@ func UpdateById(ctx *gin.Context) {
 }
 
 func DeleteById(ctx *gin.Context) {
+	id := ctx.Param("id")
 
+	result := database.DB.Table("users").Unscoped().Where("id = ?", id).Delete(&models.User{})
+
+	if result.Error != nil {
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+			"message": "Internal server error.",
+		})
+
+		return
+	}
+
+	if result.RowsAffected == 0 {
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+			"message": "User not found.",
+		})
+
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"message": "User has been deleted.",
+	})
 }
 
 func findUserById(id *string, user *responses.UserResponse) (int, string) {
